@@ -220,13 +220,6 @@ cd frontend
 npm test
 ```
 
-## 🏆 Hackathon Highlights
-
-1. **LangGraph Multi-Agent System**: Advanced AI agent orchestration with debate loops
-2. **Hedera Native Integration**: Real blockchain transactions, not just demos
-3. **Streaming UX**: Watch agents "think" in real-time
-4. **Accountability**: AI predictions with financial consequences
-
 ## 📄 License
 
 MIT License - see [LICENSE](LICENSE) for details.
