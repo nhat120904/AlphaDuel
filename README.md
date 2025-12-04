@@ -237,5 +237,5 @@ Contributions welcome! Please read our [Contributing Guide](CONTRIBUTING.md) fir
 
 ---
 
-Built with ❤️ for the Hedera Hackathon
+Built with ❤️
 
