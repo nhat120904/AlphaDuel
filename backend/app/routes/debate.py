@@ -100,7 +100,7 @@ async def stream_debate(
 ):
     """
     Start a new debate with Server-Sent Events streaming
-    Streams each agent's response as it is generated
+    Streams each agent's response token-by-token as it is generated
     """
     market_service, hedera_service, openai_api_key = services
     
@@ -108,13 +108,11 @@ async def stream_debate(
         try:
             graph = create_debate_graph(market_service, hedera_service, api_key=openai_api_key)
             
-            async for message in graph.run(request.query, request.symbol):
+            # Use run_stream for token-by-token streaming
+            async for message in graph.run_stream(request.query, request.symbol):
                 # Format as SSE
                 data = json.dumps(message, default=str)
                 yield f"data: {data}\n\n"
-                
-                # Small delay to prevent overwhelming the client
-                await asyncio.sleep(0.01)
             
             # Send completion event
             yield f"data: {json.dumps({'type': 'done', 'status': 'completed'})}\n\n"

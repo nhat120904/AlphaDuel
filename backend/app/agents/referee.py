@@ -1,7 +1,7 @@
 """
 Referee Agent - The impartial judge
 """
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, AsyncGenerator
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage
 import json
@@ -72,6 +72,72 @@ Remember to be objective and base your decision on the quality of arguments and 
         verdict["wager_amount"] = self._calculate_wager(verdict.get("confidence_score", 50))
         
         return verdict
+    
+    async def evaluate_stream(
+        self,
+        bull_arguments: List[Dict[str, Any]],
+        bear_arguments: List[Dict[str, Any]],
+        market_data: Dict[str, Any],
+        user_query: str
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        Stream evaluation of the debate and determine a winner
+        
+        Args:
+            bull_arguments: List of bull agent's arguments
+            bear_arguments: List of bear agent's arguments
+            market_data: Current market data
+            user_query: Original user question
+            
+        Yields:
+            Streaming tokens and final verdict with winner, confidence score, and reasoning
+        """
+        # Format the debate for the referee
+        debate_summary = self._format_debate(bull_arguments, bear_arguments)
+        
+        prompt = f"""
+User's Original Question: {user_query}
+
+Asset: {market_data.get('symbol', 'N/A')}
+Current Price: ${market_data.get('current_price', 0):.4f}
+24h Change: {market_data.get('price_change_percentage_24h', 0):.2f}%
+RSI: {market_data.get('rsi', 50):.1f}
+
+=== DEBATE TRANSCRIPT ===
+
+{debate_summary}
+
+=== END DEBATE ===
+
+Based on the arguments presented, provide your verdict as a JSON object.
+Remember to be objective and base your decision on the quality of arguments and evidence presented.
+"""
+        
+        messages = [
+            SystemMessage(content=self.system_prompt),
+            HumanMessage(content=prompt)
+        ]
+        
+        full_content = ""
+        async for chunk in self.llm.astream(messages):
+            token = chunk.content if isinstance(chunk.content, str) else ""
+            if token:
+                full_content += token
+                yield {
+                    "type": "token",
+                    "agent": "Referee",
+                    "token": token,
+                }
+        
+        # Parse and yield final verdict
+        verdict = self._parse_verdict(full_content)
+        verdict["wager_amount"] = self._calculate_wager(verdict.get("confidence_score", 50))
+        
+        yield {
+            "type": "complete",
+            "agent": "Referee",
+            **verdict,
+        }
     
     def _format_debate(
         self,

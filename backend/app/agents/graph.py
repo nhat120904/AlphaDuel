@@ -4,8 +4,7 @@ Manages the stateful workflow between Bull, Bear, and Referee agents
 """
 from typing import Dict, Any, AsyncGenerator, Literal, Optional
 from langgraph.graph import StateGraph, END
-import asyncio
-import json
+from langgraph.graph.state import CompiledStateGraph
 import logging
 import os
 
@@ -37,7 +36,7 @@ class DebateGraph:
         self.referee_agent = RefereeAgent(model="gpt-4.1", api_key=openai_api_key)
         self.graph = self._build_graph()
     
-    def _build_graph(self) -> StateGraph:
+    def _build_graph(self) -> CompiledStateGraph:
         """Build the LangGraph workflow"""
         workflow = StateGraph(AgentState)
         
@@ -104,7 +103,7 @@ class DebateGraph:
             }
     
     async def _bull_argues(self, state: AgentState) -> Dict[str, Any]:
-        """Bull agent makes its argument"""
+        """Bull agent makes its argument (non-streaming for graph nodes)"""
         logger.info(f"Bull agent analyzing (round {state['current_round'] + 1})")
         
         is_counter = state['current_round'] > 0
@@ -135,8 +134,61 @@ class DebateGraph:
             }]
         }
     
+    async def _bull_argues_stream(
+        self, state: AgentState
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """Bull agent makes its argument with streaming"""
+        logger.info(f"Bull agent analyzing (round {state['current_round'] + 1}) - streaming")
+        
+        is_counter = state['current_round'] > 0
+        result = None
+        
+        if is_counter and state['bear_arguments']:
+            # Counter-argument mode with streaming
+            last_bear_arg = state['bear_arguments'][-1]
+            async for chunk in self.bull_agent.counter_argue_stream(
+                last_bear_arg['argument'],
+                state['market_data']
+            ):
+                if chunk["type"] == "token":
+                    yield {
+                        "node": "bull_argues",
+                        "type": "bull_token",
+                        "token": chunk["token"],
+                        "round": state['current_round'] + 1
+                    }
+                elif chunk["type"] == "complete":
+                    result = chunk
+        else:
+            # Initial argument with streaming
+            async for chunk in self.bull_agent.analyze_stream(
+                state['market_data'],
+                state['user_query']
+            ):
+                if chunk["type"] == "token":
+                    yield {
+                        "node": "bull_argues",
+                        "type": "bull_token",
+                        "token": chunk["token"],
+                        "round": state['current_round'] + 1
+                    }
+                elif chunk["type"] == "complete":
+                    result = chunk
+        
+        # Yield the complete message at the end
+        if result:
+            yield {
+                "node": "bull_argues",
+                "type": "bull_complete",
+                "content": result.get('argument', ''),
+                "confidence": result.get('confidence', 65),
+                "key_points": result.get('key_points', []),
+                "round": state['current_round'] + 1,
+                "result": result
+            }
+    
     async def _bear_argues(self, state: AgentState) -> Dict[str, Any]:
-        """Bear agent makes its argument"""
+        """Bear agent makes its argument (non-streaming for graph nodes)"""
         logger.info(f"Bear agent analyzing (round {state['current_round'] + 1})")
         
         is_counter = state['current_round'] > 0
@@ -167,6 +219,59 @@ class DebateGraph:
             }]
         }
     
+    async def _bear_argues_stream(
+        self, state: AgentState
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """Bear agent makes its argument with streaming"""
+        logger.info(f"Bear agent analyzing (round {state['current_round'] + 1}) - streaming")
+        
+        is_counter = state['current_round'] > 0
+        result = None
+        
+        if is_counter and state['bull_arguments']:
+            # Counter-argument mode with streaming
+            last_bull_arg = state['bull_arguments'][-1]
+            async for chunk in self.bear_agent.counter_argue_stream(
+                last_bull_arg['argument'],
+                state['market_data']
+            ):
+                if chunk["type"] == "token":
+                    yield {
+                        "node": "bear_argues",
+                        "type": "bear_token",
+                        "token": chunk["token"],
+                        "round": state['current_round'] + 1
+                    }
+                elif chunk["type"] == "complete":
+                    result = chunk
+        else:
+            # Initial argument with streaming
+            async for chunk in self.bear_agent.analyze_stream(
+                state['market_data'],
+                state['user_query']
+            ):
+                if chunk["type"] == "token":
+                    yield {
+                        "node": "bear_argues",
+                        "type": "bear_token",
+                        "token": chunk["token"],
+                        "round": state['current_round'] + 1
+                    }
+                elif chunk["type"] == "complete":
+                    result = chunk
+        
+        # Yield the complete message at the end
+        if result:
+            yield {
+                "node": "bear_argues",
+                "type": "bear_complete",
+                "content": result.get('argument', ''),
+                "confidence": result.get('confidence', 65),
+                "key_points": result.get('key_points', []),
+                "round": state['current_round'] + 1,
+                "result": result
+            }
+    
     async def _check_debate_rounds(self, state: AgentState) -> Dict[str, Any]:
         """Check if we should continue the debate"""
         new_round = state['current_round'] + 1
@@ -187,7 +292,7 @@ class DebateGraph:
         return "conclude"
     
     async def _referee_decides(self, state: AgentState) -> Dict[str, Any]:
-        """Referee evaluates and picks a winner"""
+        """Referee evaluates and picks a winner (non-streaming for graph nodes)"""
         logger.info("Referee evaluating debate")
         
         verdict = await self.referee_agent.evaluate(
@@ -209,6 +314,41 @@ class DebateGraph:
                 "key_factors": verdict.get('key_factors', [])
             }]
         }
+    
+    async def _referee_decides_stream(
+        self, state: AgentState
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """Referee evaluates and picks a winner with streaming"""
+        logger.info("Referee evaluating debate - streaming")
+        
+        verdict = None
+        async for chunk in self.referee_agent.evaluate_stream(
+            state['bull_arguments'],
+            state['bear_arguments'],
+            state['market_data'],
+            state['user_query']
+        ):
+            if chunk["type"] == "token":
+                yield {
+                    "node": "referee_decides",
+                    "type": "referee_token",
+                    "token": chunk["token"],
+                }
+            elif chunk["type"] == "complete":
+                verdict = chunk
+        
+        # Yield the complete verdict
+        if verdict:
+            yield {
+                "node": "referee_decides",
+                "type": "referee_complete",
+                "content": verdict.get('reasoning', ''),
+                "winner": verdict.get('winner'),
+                "confidence_score": verdict.get('confidence_score'),
+                "wager_amount": verdict.get('wager_amount'),
+                "key_factors": verdict.get('key_factors', []),
+                "verdict": verdict
+            }
     
     async def _execute_hedera(self, state: AgentState) -> Dict[str, Any]:
         """Execute Hedera transactions (HCS log + wager)"""
@@ -254,7 +394,7 @@ class DebateGraph:
     
     async def run(self, user_query: str, symbol: str = "HBAR") -> AsyncGenerator[Dict[str, Any], None]:
         """
-        Run the debate and yield messages as they are generated
+        Run the debate and yield messages as they are generated (non-streaming LLM)
         
         Args:
             user_query: The user's question
@@ -284,6 +424,130 @@ class DebateGraph:
                         "status": output["status"]
                     }
     
+    async def run_stream(
+        self, user_query: str, symbol: str = "HBAR"
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        Run the debate with token-by-token streaming from each agent
+        
+        Args:
+            user_query: The user's question
+            symbol: The cryptocurrency symbol to analyze
+            
+        Yields:
+            Streaming tokens and messages from each step of the debate
+        """
+        state = create_initial_state(user_query, symbol)
+        
+        # Step 1: Fetch market data (non-streaming, just data fetch)
+        yield {
+            "node": "fetch_market_data",
+            "type": "status",
+            "status": "fetching_market_data"
+        }
+        
+        market_result = await self._fetch_market_data(state)
+        state["market_data"] = market_result.get("market_data", {})
+        state["status"] = market_result.get("status")
+        
+        if market_result.get("messages"):
+            for message in market_result["messages"]:
+                yield {"node": "fetch_market_data", **message}
+        
+        if market_result.get("status") == "error":
+            return
+        
+        # Debate loop
+        while state["current_round"] < state["max_rounds"]:
+            current_round = state["current_round"]
+            
+            # Step 2: Bull argues with streaming
+            yield {
+                "node": "bull_argues",
+                "type": "status",
+                "status": "bull_analyzing",
+                "round": current_round + 1
+            }
+            
+            bull_result = None
+            async for chunk in self._bull_argues_stream(state):
+                yield chunk
+                if chunk.get("type") == "bull_complete":
+                    bull_result = chunk.get("result")
+            
+            if bull_result:
+                state["bull_arguments"] = state.get("bull_arguments", []) + [bull_result]
+            
+            # Step 3: Bear argues with streaming
+            yield {
+                "node": "bear_argues",
+                "type": "status",
+                "status": "bear_analyzing",
+                "round": current_round + 1
+            }
+            
+            bear_result = None
+            async for chunk in self._bear_argues_stream(state):
+                yield chunk
+                if chunk.get("type") == "bear_complete":
+                    bear_result = chunk.get("result")
+            
+            if bear_result:
+                state["bear_arguments"] = state.get("bear_arguments", []) + [bear_result]
+            
+            # Increment round
+            state["current_round"] = current_round + 1
+            
+            yield {
+                "node": "check_debate_rounds",
+                "type": "status",
+                "status": "round_complete",
+                "round": state["current_round"],
+                "max_rounds": state["max_rounds"]
+            }
+        
+        # Step 4: Referee decides with streaming
+        yield {
+            "node": "referee_decides",
+            "type": "status",
+            "status": "referee_evaluating"
+        }
+        
+        verdict = None
+        async for chunk in self._referee_decides_stream(state):
+            yield chunk
+            if chunk.get("type") == "referee_complete":
+                verdict = chunk.get("verdict")
+        
+        if verdict:
+            state["verdict"] = verdict
+        
+        # Step 5: Execute Hedera transactions
+        yield {
+            "node": "execute_hedera",
+            "type": "status",
+            "status": "executing_hedera"
+        }
+        
+        hedera_result = await self._execute_hedera(state)
+        
+        if hedera_result.get("messages"):
+            for message in hedera_result["messages"]:
+                yield {"node": "execute_hedera", **message}
+        
+        yield {
+            "node": "complete",
+            "type": "status",
+            "status": "completed",
+            "final_state": {
+                "winner": state.get("verdict", {}).get("winner"),
+                "confidence_score": state.get("verdict", {}).get("confidence_score"),
+                "wager_amount": state.get("verdict", {}).get("wager_amount"),
+                "hcs_tx": hedera_result.get("hcs_tx"),
+                "wager_tx": hedera_result.get("wager_tx"),
+            }
+        }
+    
     async def run_complete(self, user_query: str, symbol: str = "HBAR") -> AgentState:
         """Run the complete debate and return final state"""
         initial_state = create_initial_state(user_query, symbol)
@@ -305,8 +569,9 @@ def create_debate_graph(
 async def run_debate(
     user_query: str,
     symbol: str = "HBAR",
-    market_service: MarketDataService = None,
-    hedera_service: HederaService = None,
+    market_service: Optional[MarketDataService] = None,
+    hedera_service: Optional[HederaService] = None,
+    stream: bool = False,
 ) -> AsyncGenerator[Dict[str, Any], None]:
     """
     Convenience function to run a debate
@@ -316,9 +581,10 @@ async def run_debate(
         symbol: The cryptocurrency symbol
         market_service: Optional market data service
         hedera_service: Optional Hedera service
+        stream: If True, use token-by-token streaming from agents
         
     Yields:
-        Messages from the debate
+        Messages from the debate (tokens if stream=True)
     """
     if market_service is None:
         market_service = MarketDataService()
@@ -332,6 +598,10 @@ async def run_debate(
     
     graph = create_debate_graph(market_service, hedera_service)
     
-    async for message in graph.run(user_query, symbol):
-        yield message
+    if stream:
+        async for message in graph.run_stream(user_query, symbol):
+            yield message
+    else:
+        async for message in graph.run(user_query, symbol):
+            yield message
 

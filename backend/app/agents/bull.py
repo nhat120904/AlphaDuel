@@ -1,7 +1,7 @@
 """
 Bull Agent - The optimistic market analyst
 """
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, AsyncGenerator
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage
 import json
@@ -98,6 +98,109 @@ Remember your bullish stance. Current market data:
             "agent": "Bull",
             "argument": response.content,
             "type": "counter",
+        }
+    
+    async def analyze_stream(
+        self, market_data: Dict[str, Any], user_query: str
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        Stream analysis of market data and generate bullish argument token by token
+        
+        Args:
+            market_data: Current market data for the asset
+            user_query: The user's original question
+            
+        Yields:
+            Streaming tokens and final result with confidence/key_points
+        """
+        prompt = f"""
+User Query: {user_query}
+
+Market Data:
+- Symbol: {market_data.get('symbol', 'N/A')}
+- Current Price: ${market_data.get('current_price', 0):.4f}
+- 24h Change: {market_data.get('price_change_percentage_24h', 0):.2f}%
+- 24h High: ${market_data.get('high_24h', 0):.4f}
+- 24h Low: ${market_data.get('low_24h', 0):.4f}
+- Volume (24h): ${market_data.get('total_volume', 0):,.0f}
+- Market Cap: ${market_data.get('market_cap', 0):,.0f}
+- RSI (14): {market_data.get('rsi', 50):.1f}
+- News Sentiment: {market_data.get('sentiment_score', 0.5):.2f}
+
+News Summary: {market_data.get('news_summary', 'No recent news available.')}
+
+Provide your bullish analysis:
+"""
+        
+        messages = [
+            SystemMessage(content=self.system_prompt),
+            HumanMessage(content=prompt)
+        ]
+        
+        full_content = ""
+        async for chunk in self.llm.astream(messages):
+            token = chunk.content if isinstance(chunk.content, str) else ""
+            if token:
+                full_content += token
+                yield {
+                    "type": "token",
+                    "agent": "Bull",
+                    "token": token,
+                }
+        
+        # Yield final result with extracted metadata
+        confidence = self._extract_confidence(full_content)
+        key_points = self._extract_key_points(full_content)
+        
+        yield {
+            "type": "complete",
+            "agent": "Bull",
+            "argument": full_content,
+            "confidence": confidence,
+            "key_points": key_points,
+            "market_data_used": {
+                "symbol": market_data.get('symbol'),
+                "price": market_data.get('current_price'),
+                "rsi": market_data.get('rsi'),
+            }
+        }
+    
+    async def counter_argue_stream(
+        self, bear_argument: str, market_data: Dict[str, Any]
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """Stream a counter-argument to the bear's position"""
+        prompt = DEBATE_COUNTER_PROMPT.format(opponent_argument=bear_argument)
+        
+        context = f"""
+Remember your bullish stance. Current market data:
+- Price: ${market_data.get('current_price', 0):.4f}
+- 24h Change: {market_data.get('price_change_percentage_24h', 0):.2f}%
+- RSI: {market_data.get('rsi', 50):.1f}
+
+{prompt}
+"""
+        
+        messages = [
+            SystemMessage(content=self.system_prompt),
+            HumanMessage(content=context)
+        ]
+        
+        full_content = ""
+        async for chunk in self.llm.astream(messages):
+            token = chunk.content if isinstance(chunk.content, str) else ""
+            if token:
+                full_content += token
+                yield {
+                    "type": "token",
+                    "agent": "Bull",
+                    "token": token,
+                }
+        
+        yield {
+            "type": "complete",
+            "agent": "Bull",
+            "argument": full_content,
+            "counter": True,
         }
     
     def _extract_confidence(self, text: str) -> float:

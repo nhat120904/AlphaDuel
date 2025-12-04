@@ -1,9 +1,18 @@
 'use client';
 
 import { useState, useCallback, useRef } from 'react';
-import type { AgentMessage, DebateState, HederaTransaction } from '@/types';
+import type { AgentMessage, DebateState } from '@/types';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
+// Track streaming state for each agent
+interface StreamingState {
+  bullContent: string;
+  bearContent: string;
+  refereeContent: string;
+  currentAgent: 'bull' | 'bear' | 'referee' | null;
+  currentRound: number;
+}
 
 export function useDebate() {
   const [state, setState] = useState<DebateState>({
@@ -13,7 +22,15 @@ export function useDebate() {
     query: '',
   });
 
+  const [currentAgent, setCurrentAgent] = useState<'bull' | 'bear' | 'referee' | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const streamingRef = useRef<StreamingState>({
+    bullContent: '',
+    bearContent: '',
+    refereeContent: '',
+    currentAgent: null,
+    currentRound: 1,
+  });
 
   const startDebate = useCallback(async (query: string, symbol: string = 'HBAR') => {
     // Cancel any existing request
@@ -22,6 +39,15 @@ export function useDebate() {
     }
 
     abortControllerRef.current = new AbortController();
+    
+    // Reset streaming state
+    streamingRef.current = {
+      bullContent: '',
+      bearContent: '',
+      refereeContent: '',
+      currentAgent: null,
+      currentRound: 1,
+    };
 
     setState({
       status: 'loading',
@@ -29,6 +55,7 @@ export function useDebate() {
       symbol,
       query,
     });
+    setCurrentAgent(null);
 
     try {
       const response = await fetch(`${API_URL}/api/debate/stream`, {
@@ -70,29 +97,189 @@ export function useDebate() {
             try {
               const data = JSON.parse(line.slice(6)) as AgentMessage;
               
-              // Update state based on message type
-              setState(prev => {
-                const newMessages = [...prev.messages, data];
+              // Handle streaming tokens - modify ref OUTSIDE setState to avoid duplication
+              if (data.type === 'bull_token') {
+                streamingRef.current.bullContent += data.token || '';
+                const currentContent = streamingRef.current.bullContent;
+                const round = data.round || streamingRef.current.currentRound;
+                setCurrentAgent('bull');
                 
-                const updates: Partial<DebateState> = {
-                  messages: newMessages,
-                };
+                setState(prev => {
+                  const newMessages = [...prev.messages];
+                  const existingIdx = newMessages.findIndex(
+                    m => m.type === 'bull' && m.round === round && !m.confidence
+                  );
+                  
+                  if (existingIdx >= 0) {
+                    newMessages[existingIdx] = { ...newMessages[existingIdx], content: currentContent };
+                  } else {
+                    newMessages.push({ type: 'bull', content: currentContent, round });
+                  }
+                  return { ...prev, messages: newMessages };
+                });
+                
+              } else if (data.type === 'bear_token') {
+                streamingRef.current.bearContent += data.token || '';
+                const currentContent = streamingRef.current.bearContent;
+                const round = data.round || streamingRef.current.currentRound;
+                setCurrentAgent('bear');
+                
+                setState(prev => {
+                  const newMessages = [...prev.messages];
+                  const existingIdx = newMessages.findIndex(
+                    m => m.type === 'bear' && m.round === round && !m.confidence
+                  );
+                  
+                  if (existingIdx >= 0) {
+                    newMessages[existingIdx] = { ...newMessages[existingIdx], content: currentContent };
+                  } else {
+                    newMessages.push({ type: 'bear', content: currentContent, round });
+                  }
+                  return { ...prev, messages: newMessages };
+                });
+                
+              } else if (data.type === 'referee_token') {
+                streamingRef.current.refereeContent += data.token || '';
+                const currentContent = streamingRef.current.refereeContent;
+                setCurrentAgent('referee');
+                
+                setState(prev => {
+                  const newMessages = [...prev.messages];
+                  const existingIdx = newMessages.findIndex(
+                    m => m.type === 'referee' && !m.winner
+                  );
+                  
+                  if (existingIdx >= 0) {
+                    newMessages[existingIdx] = { ...newMessages[existingIdx], content: currentContent };
+                  } else {
+                    newMessages.push({ type: 'referee', content: currentContent });
+                  }
+                  return { ...prev, messages: newMessages };
+                });
 
-                if (data.type === 'done') {
-                  updates.status = 'completed';
-                } else if (data.type === 'error') {
-                  updates.status = 'error';
-                } else if (data.type === 'referee') {
-                  updates.winner = data.winner;
-                  updates.confidence_score = data.confidence_score;
-                  updates.wager_amount = data.wager_amount;
-                } else if (data.type === 'hedera') {
-                  updates.hcs_tx = data.hcs_tx;
-                  updates.wager_tx = data.wager_tx;
+              // Handle completion messages
+              } else if (data.type === 'bull_complete') {
+                const finalContent = data.content || streamingRef.current.bullContent;
+                const round = data.round || streamingRef.current.currentRound;
+                streamingRef.current.bullContent = '';
+                setCurrentAgent(null);
+                
+                setState(prev => {
+                  const newMessages = [...prev.messages];
+                  const existingIdx = newMessages.findIndex(
+                    m => m.type === 'bull' && m.round === round && !m.confidence
+                  );
+                  
+                  const completeMessage: AgentMessage = {
+                    type: 'bull',
+                    content: finalContent,
+                    confidence: data.confidence,
+                    key_points: data.key_points,
+                    round,
+                  };
+                  
+                  if (existingIdx >= 0) {
+                    newMessages[existingIdx] = completeMessage;
+                  } else {
+                    newMessages.push(completeMessage);
+                  }
+                  return { ...prev, messages: newMessages };
+                });
+                
+              } else if (data.type === 'bear_complete') {
+                const finalContent = data.content || streamingRef.current.bearContent;
+                const round = data.round || streamingRef.current.currentRound;
+                streamingRef.current.bearContent = '';
+                streamingRef.current.currentRound += 1;
+                setCurrentAgent(null);
+                
+                setState(prev => {
+                  const newMessages = [...prev.messages];
+                  const existingIdx = newMessages.findIndex(
+                    m => m.type === 'bear' && m.round === round && !m.confidence
+                  );
+                  
+                  const completeMessage: AgentMessage = {
+                    type: 'bear',
+                    content: finalContent,
+                    confidence: data.confidence,
+                    key_points: data.key_points,
+                    round,
+                  };
+                  
+                  if (existingIdx >= 0) {
+                    newMessages[existingIdx] = completeMessage;
+                  } else {
+                    newMessages.push(completeMessage);
+                  }
+                  return { ...prev, messages: newMessages };
+                });
+                
+              } else if (data.type === 'referee_complete') {
+                const finalContent = data.content || streamingRef.current.refereeContent;
+                streamingRef.current.refereeContent = '';
+                setCurrentAgent(null);
+                
+                setState(prev => {
+                  const newMessages = [...prev.messages];
+                  const existingIdx = newMessages.findIndex(
+                    m => m.type === 'referee' && !m.winner
+                  );
+                  
+                  const completeMessage: AgentMessage = {
+                    type: 'referee',
+                    content: finalContent,
+                    winner: data.winner,
+                    confidence_score: data.confidence_score,
+                    wager_amount: data.wager_amount,
+                    key_factors: data.key_factors,
+                  };
+                  
+                  if (existingIdx >= 0) {
+                    newMessages[existingIdx] = completeMessage;
+                  } else {
+                    newMessages.push(completeMessage);
+                  }
+                  return {
+                    ...prev,
+                    messages: newMessages,
+                    winner: data.winner,
+                    confidence_score: data.confidence_score,
+                    wager_amount: data.wager_amount,
+                  };
+                });
+
+              // Handle other message types
+              } else if (data.type === 'done') {
+                setCurrentAgent(null);
+                setState(prev => ({ ...prev, status: 'completed' }));
+              } else if (data.type === 'error') {
+                setState(prev => ({
+                  ...prev,
+                  status: 'error',
+                  messages: [...prev.messages, data],
+                }));
+              } else if (data.type === 'hedera') {
+                setState(prev => ({
+                  ...prev,
+                  messages: [...prev.messages, data],
+                  hcs_tx: data.hcs_tx,
+                  wager_tx: data.wager_tx,
+                }));
+              } else if (data.type === 'system') {
+                setState(prev => ({
+                  ...prev,
+                  messages: [...prev.messages, data],
+                }));
+              } else if (data.type === 'status') {
+                if (data.status === 'bull_analyzing') {
+                  setCurrentAgent('bull');
+                } else if (data.status === 'bear_analyzing') {
+                  setCurrentAgent('bear');
+                } else if (data.status === 'referee_evaluating') {
+                  setCurrentAgent('referee');
                 }
-
-                return { ...prev, ...updates };
-              });
+              }
             } catch (e) {
               console.error('Failed to parse SSE message:', e);
             }
@@ -101,6 +288,7 @@ export function useDebate() {
       }
 
       setState(prev => ({ ...prev, status: 'completed' }));
+      setCurrentAgent(null);
     } catch (error) {
       if ((error as Error).name === 'AbortError') {
         console.log('Request aborted');
@@ -119,6 +307,7 @@ export function useDebate() {
           },
         ],
       }));
+      setCurrentAgent(null);
     }
   }, []);
 
@@ -126,16 +315,25 @@ export function useDebate() {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
+    streamingRef.current = {
+      bullContent: '',
+      bearContent: '',
+      refereeContent: '',
+      currentAgent: null,
+      currentRound: 1,
+    };
     setState({
       status: 'idle',
       messages: [],
       symbol: 'HBAR',
       query: '',
     });
+    setCurrentAgent(null);
   }, []);
 
   return {
     ...state,
+    currentAgent,
     startDebate,
     reset,
     isLoading: state.status === 'loading' || state.status === 'debating',

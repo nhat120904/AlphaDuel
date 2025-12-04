@@ -13,8 +13,11 @@ export interface MarketData {
 }
 
 export interface AgentMessage {
-  type: 'bull' | 'bear' | 'referee' | 'system' | 'hedera' | 'error' | 'status' | 'done';
-  content: string;
+  type: 'bull' | 'bear' | 'referee' | 'system' | 'hedera' | 'error' | 'status' | 'done' 
+    | 'bull_token' | 'bear_token' | 'referee_token' 
+    | 'bull_complete' | 'bear_complete' | 'referee_complete';
+  content?: string;
+  token?: string;
   confidence?: number;
   key_points?: string[];
   round?: number;

@@ -2,6 +2,9 @@
 
 import { useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { Scale } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { BullBubble } from './BullBubble';
 import { BearBubble } from './BearBubble';
 import { RefereeCard } from './RefereeCard';
@@ -29,7 +32,7 @@ export function DebateArena({ messages, isLoading, currentAgent }: DebateArenaPr
         return (
           <BullBubble
             key={index}
-            content={message.content}
+            content={message.content || ''}
             confidence={message.confidence}
             keyPoints={message.key_points}
             round={message.round}
@@ -40,7 +43,7 @@ export function DebateArena({ messages, isLoading, currentAgent }: DebateArenaPr
         return (
           <BearBubble
             key={index}
-            content={message.content}
+            content={message.content || ''}
             confidence={message.confidence}
             keyPoints={message.key_points}
             round={message.round}
@@ -53,13 +56,36 @@ export function DebateArena({ messages, isLoading, currentAgent }: DebateArenaPr
         if (hasHederaMessage) {
           return null;
         }
+        // If no winner yet, this is streaming content - show it in a simpler format
+        if (!message.winner) {
+          return (
+            <motion.div
+              key={index}
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="w-full max-w-2xl mx-auto"
+            >
+              <div className="glass-hedera rounded-2xl p-6 glow-hedera">
+                <div className="flex items-center gap-3 mb-4">
+                  <Scale className="w-6 h-6 text-hedera-400" />
+                  <span className="text-hedera-300 font-medium">Referee is deliberating...</span>
+                </div>
+                <div className="prose prose-invert prose-sm max-w-none prose-p:text-dark-200">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {message.content || ''}
+                  </ReactMarkdown>
+                </div>
+              </div>
+            </motion.div>
+          );
+        }
         return (
           <RefereeCard
             key={index}
-            winner={message.winner || 'Bull'}
+            winner={message.winner}
             confidenceScore={message.confidence_score || 50}
             wagerAmount={message.wager_amount || 0}
-            reasoning={message.content}
+            reasoning={message.content || ''}
             keyFactors={message.key_factors}
           />
         );
@@ -83,7 +109,7 @@ export function DebateArena({ messages, isLoading, currentAgent }: DebateArenaPr
         return (
           <SystemMessage
             key={index}
-            content={message.content}
+            content={message.content || ''}
             data={message.data}
           />
         );
@@ -113,14 +139,14 @@ export function DebateArena({ messages, isLoading, currentAgent }: DebateArenaPr
       <AnimatePresence mode="popLayout">
         {messages.map((message, index) => renderMessage(message, index))}
         
-        {/* Loading indicators */}
-        {isLoading && currentAgent === 'bull' && (
+        {/* Loading indicators - only show if no streaming content yet */}
+        {isLoading && currentAgent === 'bull' && !messages.some(m => m.type === 'bull' && !m.confidence) && (
           <BullBubble key="loading-bull" content="" isLoading />
         )}
-        {isLoading && currentAgent === 'bear' && (
+        {isLoading && currentAgent === 'bear' && !messages.some(m => m.type === 'bear' && !m.confidence) && (
           <BearBubble key="loading-bear" content="" isLoading />
         )}
-        {isLoading && currentAgent === 'referee' && (
+        {isLoading && currentAgent === 'referee' && !messages.some(m => m.type === 'referee' && !m.winner) && (
           <RefereeCard
             key="loading-referee"
             winner="Bull"
