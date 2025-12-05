@@ -9,15 +9,18 @@ import re
 import os
 
 from .prompts import BULL_SYSTEM_PROMPT, DEBATE_COUNTER_PROMPT
+from ..config import get_settings
 
 
 class BullAgent:
     """Bull Agent that argues for upside potential"""
     
-    def __init__(self, model: str = "gpt-4.1", temperature: float = 0.7, api_key: Optional[str] = None):
-        # Get API key from parameter, env var, or config
-        openai_api_key = api_key or os.getenv("OPENAI_API_KEY")
-        self.llm = ChatOpenAI(model=model, temperature=temperature, api_key=openai_api_key)
+    def __init__(self, model: str = "gpt-4.1", temperature: Optional[float] = None, api_key: Optional[str] = None):
+        # Get API key and temperature from parameter or config
+        settings = get_settings()
+        openai_api_key = api_key or settings.openai_api_key
+        temp = temperature if temperature is not None else settings.bull_temperature
+        self.llm = ChatOpenAI(model=model, temperature=temp, api_key=openai_api_key)
         self.system_prompt = BULL_SYSTEM_PROMPT
     
     async def analyze(self, market_data: Dict[str, Any], user_query: str) -> Dict[str, Any]:

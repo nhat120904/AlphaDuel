@@ -13,8 +13,8 @@ langchain-openai
 langchain-community
 langgraph
 
-# Hedera SDK (Official Hiero SDK)
-hiero-sdk-python
+# Hedera SDK (Official Hedera Python SDK)
+hashgraph-sdk
 
 # External APIs
 tavily-python==0.5.0

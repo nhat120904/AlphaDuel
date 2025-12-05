@@ -103,42 +103,20 @@ class MarketDataService:
                     "low_24h": market_data.get("low_24h", {}).get("usd", 0),
                 }
             else:
-                logger.warning(f"CoinGecko API returned status {response.status_code}: {response.text}")
-                return self._get_mock_price_data(coin_id)
+                logger.error(f"CoinGecko API returned status {response.status_code}: {response.text}")
+                raise Exception(f"CoinGecko API error: {response.status_code} - {response.text}")
         
         except httpx.ConnectError as e:
             logger.error(f"Connection error fetching price data (DNS/network issue): {e}")
-            return self._get_mock_price_data(coin_id)
+            raise Exception(f"Connection error: {e}")
         except httpx.TimeoutException as e:
             logger.error(f"Timeout fetching price data: {e}")
-            return self._get_mock_price_data(coin_id)
+            raise Exception(f"Timeout error: {e}")
         except Exception as e:
             logger.error(f"Error fetching price data: {type(e).__name__}: {e}")
-            return self._get_mock_price_data(coin_id)
+            raise
     
-    def _get_mock_price_data(self, coin_id: str) -> Dict[str, Any]:
-        """Return mock data for development/testing"""
-        mock_data = {
-            "hedera-hashgraph": {
-                "current_price": 0.0725,
-                "price_change_24h": 0.0032,
-                "price_change_percentage_24h": 4.62,
-                "market_cap": 2750000000,
-                "total_volume": 89000000,
-                "high_24h": 0.0745,
-                "low_24h": 0.0685,
-            },
-            "bitcoin": {
-                "current_price": 97500,
-                "price_change_24h": 2350,
-                "price_change_percentage_24h": 2.47,
-                "market_cap": 1920000000000,
-                "total_volume": 45000000000,
-                "high_24h": 98200,
-                "low_24h": 95100,
-            }
-        }
-        return mock_data.get(coin_id, mock_data["hedera-hashgraph"])
+
     
     async def _calculate_rsi(self, client: httpx.AsyncClient, coin_id: str) -> float:
         """Calculate RSI based on historical data"""
@@ -182,17 +160,19 @@ class MarketDataService:
                 
                 return round(rsi, 2)
             
-            return 50.0
+            else:
+                logger.error(f"Failed to fetch RSI data: {response.status_code}")
+                raise Exception(f"RSI calculation failed: API returned {response.status_code}")
         
         except httpx.ConnectError as e:
             logger.error(f"Connection error calculating RSI: {e}")
-            return 50.0
+            raise Exception(f"RSI calculation connection error: {e}")
         except httpx.TimeoutException as e:
             logger.error(f"Timeout calculating RSI: {e}")
-            return 50.0
+            raise Exception(f"RSI calculation timeout: {e}")
         except Exception as e:
             logger.error(f"Error calculating RSI: {type(e).__name__}: {e}")
-            return 50.0
+            raise
     
     async def _fetch_news_sentiment(self, client: httpx.AsyncClient, symbol: str) -> Dict[str, Any]:
         """Fetch news and calculate sentiment"""

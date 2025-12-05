@@ -29,6 +29,11 @@ class Settings(BaseSettings):
     # HCS Topic (will be created on first run if not set)
     hcs_topic_id: str = ""
     
+    # LLM Temperature Settings
+    bull_temperature: float = 0
+    bear_temperature: float = 0
+    referee_temperature: float = 0
+    
     class Config:
         env_file = ".env"
         case_sensitive = False

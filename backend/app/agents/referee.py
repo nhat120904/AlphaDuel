@@ -9,15 +9,18 @@ import re
 import os
 
 from .prompts import REFEREE_SYSTEM_PROMPT
+from ..config import get_settings
 
 
 class RefereeAgent:
     """Referee Agent that evaluates the debate and determines a winner"""
     
-    def __init__(self, model: str = "gpt-4.1", temperature: float = 0.3, api_key: Optional[str] = None):
+    def __init__(self, model: str = "gpt-4.1", temperature: Optional[float] = None, api_key: Optional[str] = None):
         # Use a more capable model for judgment with lower temperature for consistency
-        openai_api_key = api_key or os.getenv("OPENAI_API_KEY")
-        self.llm = ChatOpenAI(model=model, temperature=temperature, api_key=openai_api_key)
+        settings = get_settings()
+        openai_api_key = api_key or settings.openai_api_key
+        temp = temperature if temperature is not None else settings.referee_temperature
+        self.llm = ChatOpenAI(model=model, temperature=temp, api_key=openai_api_key)
         self.system_prompt = REFEREE_SYSTEM_PROMPT
     
     async def evaluate(
