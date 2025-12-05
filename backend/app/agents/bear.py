@@ -8,14 +8,17 @@ import re
 import os
 
 from .prompts import BEAR_SYSTEM_PROMPT, DEBATE_COUNTER_PROMPT
+from ..config import get_settings
 
 
 class BearAgent:
     """Bear Agent that argues for downside risks"""
     
-    def __init__(self, model: str = "gpt-4.1", temperature: float = 0.7, api_key: Optional[str] = None):
-        openai_api_key = api_key or os.getenv("OPENAI_API_KEY")
-        self.llm = ChatOpenAI(model=model, temperature=temperature, api_key=openai_api_key)
+    def __init__(self, model: str = "gpt-4.1", temperature: Optional[float] = None, api_key: Optional[str] = None):
+        settings = get_settings()
+        openai_api_key = api_key or settings.openai_api_key
+        temp = temperature if temperature is not None else settings.bear_temperature
+        self.llm = ChatOpenAI(model=model, temperature=temp, api_key=openai_api_key)
         self.system_prompt = BEAR_SYSTEM_PROMPT
     
     async def analyze(self, market_data: Dict[str, Any], user_query: str) -> Dict[str, Any]:

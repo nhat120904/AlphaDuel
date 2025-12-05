@@ -1,0 +1,13 @@
+{
+  "tx_id": "0.0.7362615@1764896611",
+  "tx_type": "HCS_LOG",
+  "status": "SUCCESS",
+  "topic_id": "0.0.1234567",
+  "message": {
+    "test": "debate result",
+    "winner": "Bull",
+    "confidence": 75.5
+  },
+  "timestamp": "2025-12-05T08:03:31.030313",
+  "network": "testnet"
+}

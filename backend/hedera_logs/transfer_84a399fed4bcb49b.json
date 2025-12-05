@@ -1,0 +1,11 @@
+{
+  "tx_id": "0.0.7362615@1764896611",
+  "tx_type": "TRANSFER",
+  "status": "SUCCESS",
+  "amount": 10.0,
+  "from_account": "0.0.7362615",
+  "to_account": "0xb73349a99b7dc69d0d1973ebd7d72bf279aa748e",
+  "memo": "Test wager",
+  "timestamp": "2025-12-05T08:03:31.030313",
+  "network": "testnet"
+}
