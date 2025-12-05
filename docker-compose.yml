@@ -7,13 +7,15 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8000:8000"
-    environment:
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - HEDERA_ACCOUNT_ID=${HEDERA_ACCOUNT_ID}
-      - HEDERA_PRIVATE_KEY=${HEDERA_PRIVATE_KEY}
-      - HEDERA_ESCROW_ACCOUNT_ID=${HEDERA_ESCROW_ACCOUNT_ID}
+    env_file:
+      - ./backend/.env
     volumes:
       - ./backend:/app
+    networks:
+      - app-network
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
   frontend:
@@ -23,11 +25,18 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - NEXT_PUBLIC_API_URL=http://backend:8000
+      # Use localhost because this runs in the browser, not inside Docker
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
     depends_on:
       - backend
     volumes:
       - ./frontend:/app
       - /app/node_modules
+    networks:
+      - app-network
     command: npm run dev
+
+networks:
+  app-network:
+    driver: bridge
 

@@ -37,7 +37,12 @@ class MarketDataService:
         """Fetch comprehensive market data for a symbol"""
         coin_id = self.SYMBOL_TO_ID.get(symbol.upper(), symbol.lower())
         
-        async with httpx.AsyncClient() as client:
+        # Configure httpx client with appropriate timeouts and SSL settings for Docker
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(60.0, connect=30.0),
+            verify=True,  # SSL verification
+            follow_redirects=True
+        ) as client:
             # Fetch price data from CoinGecko
             price_data = await self._fetch_price_data(client, coin_id)
             
@@ -70,6 +75,8 @@ class MarketDataService:
             if self.coingecko_api_key:
                 headers["x-cg-demo-api-key"] = self.coingecko_api_key
             
+            logger.info(f"Fetching price data for {coin_id} from CoinGecko...")
+            
             response = await client.get(
                 f"{self.COINGECKO_BASE_URL}/coins/{coin_id}",
                 params={
@@ -79,12 +86,13 @@ class MarketDataService:
                     "developer_data": "false",
                 },
                 headers=headers,
-                timeout=10.0
+                timeout=30.0  # Increased timeout for Docker environments
             )
             
             if response.status_code == 200:
                 data = response.json()
                 market_data = data.get("market_data", {})
+                logger.info(f"Successfully fetched price data for {coin_id}")
                 return {
                     "current_price": market_data.get("current_price", {}).get("usd", 0),
                     "price_change_24h": market_data.get("price_change_24h", 0),
@@ -95,11 +103,17 @@ class MarketDataService:
                     "low_24h": market_data.get("low_24h", {}).get("usd", 0),
                 }
             else:
-                logger.warning(f"CoinGecko API returned status {response.status_code}")
+                logger.warning(f"CoinGecko API returned status {response.status_code}: {response.text}")
                 return self._get_mock_price_data(coin_id)
-                
+        
+        except httpx.ConnectError as e:
+            logger.error(f"Connection error fetching price data (DNS/network issue): {e}")
+            return self._get_mock_price_data(coin_id)
+        except httpx.TimeoutException as e:
+            logger.error(f"Timeout fetching price data: {e}")
+            return self._get_mock_price_data(coin_id)
         except Exception as e:
-            logger.error(f"Error fetching price data: {e}")
+            logger.error(f"Error fetching price data: {type(e).__name__}: {e}")
             return self._get_mock_price_data(coin_id)
     
     def _get_mock_price_data(self, coin_id: str) -> Dict[str, Any]:
@@ -133,11 +147,13 @@ class MarketDataService:
             if self.coingecko_api_key:
                 headers["x-cg-demo-api-key"] = self.coingecko_api_key
             
+            logger.info(f"Fetching historical data for RSI calculation...")
+            
             response = await client.get(
                 f"{self.COINGECKO_BASE_URL}/coins/{coin_id}/market_chart",
                 params={"vs_currency": "usd", "days": "14"},
                 headers=headers,
-                timeout=10.0
+                timeout=30.0  # Increased timeout for Docker environments
             )
             
             if response.status_code == 200:
@@ -167,9 +183,15 @@ class MarketDataService:
                 return round(rsi, 2)
             
             return 50.0
-            
+        
+        except httpx.ConnectError as e:
+            logger.error(f"Connection error calculating RSI: {e}")
+            return 50.0
+        except httpx.TimeoutException as e:
+            logger.error(f"Timeout calculating RSI: {e}")
+            return 50.0
         except Exception as e:
-            logger.error(f"Error calculating RSI: {e}")
+            logger.error(f"Error calculating RSI: {type(e).__name__}: {e}")
             return 50.0
     
     async def _fetch_news_sentiment(self, client: httpx.AsyncClient, symbol: str) -> Dict[str, Any]:
