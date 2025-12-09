@@ -209,13 +209,23 @@ class HederaService:
                 
                 transaction = TransferTransaction() \
                     .addHbarTransfer(from_account, Hbar(-amount)) \
-                    .addHbarTransfer(to_account, Hbar(amount))
+                    .addHbarTransfer(to_account, Hbar(amount)) \
+                    .setMaxTransactionFee(Hbar(1))
                 
                 if memo:
                     transaction = transaction.setTransactionMemo(memo)
                 
-                response = await asyncio.to_thread(transaction.execute, self.client)
-                receipt = await asyncio.to_thread(response.getReceipt, self.client)
+                logger.info(f"Executing transfer transaction...")
+                
+                try:
+                    response = await asyncio.wait_for(
+                        asyncio.to_thread(transaction.execute, self.client),
+                        timeout=30.0
+                    )
+                    receipt = await asyncio.to_thread(response.getReceipt, self.client)
+                except asyncio.TimeoutError:
+                    logger.error("Transfer timeout after 30s - testnet may be slow")
+                    raise Exception("Transfer timeout - testnet may be experiencing issues")
                 
                 tx_id = response.transactionId.toString()
                 balance = await self.get_account_balance()
